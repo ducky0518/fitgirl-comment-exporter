@@ -1,4 +1,4 @@
-A standalone Python utility that fetches and formats all **Tolstoy Comments** from any [FitGirl Repacks](https://fitgirl-repacks.site/) game page into a **beautiful self-contained HTML file**.
+A standalone Python utility that fetches and formats all **Comments, replies, and images** from any [FitGirl Repacks](https://fitgirl-repacks.site/) game page into a **beautiful self-contained HTML file**.
 
 ---
 
