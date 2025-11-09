@@ -37,8 +37,8 @@ The generated HTML looks like this:
 ## ⚙️ Installation
 
 ```bash
-git clone https://github.com/YOURUSERNAME/tolstoy-comment-exporter.git
-cd tolstoy-comment-exporter
+git clone https://github.com/ducky0518/fitgirl-comment-exporter.git
+cd fitgirl-comment-exporter
 pip install requests
 
 ## 🚀 Usage
@@ -46,7 +46,7 @@ pip install requests
 Basic example:
 
 ```bash
-python tolstoy_comments_to_html.py "https://fitgirl-repacks.site/session-skate-sim/"
+python fitgirl_comment_exporter.py "https://fitgirl-repacks.site/session-skate-sim/"
 ```
 
 Output:
