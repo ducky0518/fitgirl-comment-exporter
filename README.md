@@ -26,11 +26,7 @@ The generated HTML looks like this:
 - Inline screenshots and gifs  
 - Theme buttons in top-right corner  
 - “Generated” time and total comment count in the toolbar
-
-<p align="center">
-  <img src="docs/example-dark.png" width="75%" alt="Dark mode example">
-  <br><em>Dark theme example (auto-switches with OS preference)</em>
-</p>
+- Dark theme example (auto-switches with OS preference)
 
 ---
 
