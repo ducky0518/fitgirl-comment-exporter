@@ -117,7 +117,7 @@ Ideas for future improvements include:
 
 ```bash
 pip install requests
-python tolstoy_comments_to_html.py "https://fitgirl-repacks.site/<any-game>/"
+python fitgirl_export_comments.py "https://fitgirl-repacks.site/<any-game>/"
 open <slug>-comments.html
 ```
 
