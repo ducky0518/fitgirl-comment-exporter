@@ -72,11 +72,6 @@ Your resulting file (e.g. `session-skate-sim-comments.html`) is completely stand
 - Contains all comment text, avatars, and images.  
 - Theme preference is remembered locally.
 
-<p align="center">
-  <img src="docs/example-light.png" width="75%" alt="Light mode example">
-  <br><em>Light theme example</em>
-</p>
-
 ---
 
 ## 🧠 How It Works
