@@ -4,17 +4,10 @@
 """
 Export all Tolstoy comments for a FitGirl page to a standalone HTML file.
 
-v6.2 updates:
-- Header toolbar split: left shows Generated + Threads; right shows theme buttons (Dark/Light/System).
-
-Retained:
-- Fixed newest → oldest for root threads; replies are oldest → newest.
-- Theme switcher with localStorage + live OS tracking.
-- Full pagination + per-thread completion using `rootid` when needed.
-- Nested replies via <a class="com_ans" data-id="...">.
-- Avatars inlined as data: URIs (robust headers + retries).
-- Inline embedding of direct-image links (.png/.jpg/.jpeg/.webp/.gif).
-- Display name priority: name → nick → "User {id}"
+v0.2 updates:
+- When an image URL is embedded, remove that exact URL from the comment body:
+  • Strips both <a href="...">...</a> anchors and plain URL text for those images.
+  • Skips rendering richpreview attachments that point to the same embedded image URL.
 
 Usage:
   pip install requests
@@ -42,7 +35,7 @@ HEADERS_DEFAULT = {
     "Connection": "keep-alive",
     "Referer": "https://fitgirl-repacks.site/",
     "Origin": "https://fitgirl-repacks.site",
-    "User-Agent": "Mozilla/5.0 (compatible; TolstoyScraper/6.2; +https://example.local)",
+    "User-Agent": "Mozilla/5.0 (compatible; TolstoyScraper/6.3; +https://example.local)",
 }
 
 IMG_HEADERS = {
@@ -189,12 +182,15 @@ def looks_like_image(url: str) -> bool:
 
 def discover_image_links(c: Comment) -> List[str]:
     urls: Set[str] = set()
+    # from anchor href
     for u in HREF_RE.findall(c.text_html or ""):
         if looks_like_image(u):
             urls.add(u)
+    # from plain link text
     for u in PLAIN_URL_RE.findall(c.text_html or ""):
         if looks_like_image(u):
             urls.add(u)
+    # from attachments (richpreview)
     for a in c.attaches or []:
         if a.get("type") == "richpreview":
             data = a.get("data") or {}
@@ -204,6 +200,9 @@ def discover_image_links(c: Comment) -> List[str]:
     return sorted(urls)
 
 def embed_linked_images(session: requests.Session, comments: List[Comment], timeout: int) -> Dict[int, List[Tuple[str, str]]]:
+    """
+    Returns mapping: comment_id -> list of (original_url, data_uri)
+    """
     by_comment: Dict[int, List[Tuple[str, str]]] = {}
     cache: Dict[str, Optional[str]] = {}
     all_urls: Set[str] = set()
@@ -213,9 +212,11 @@ def embed_linked_images(session: requests.Session, comments: List[Comment], time
         if ulist:
             per_comment_urls[c.id] = ulist
             all_urls.update(ulist)
+    # fetch unique images once
     for url in all_urls:
         cache[url] = url_to_data_uri(session, url, timeout)
         time.sleep(0.05)
+    # map per comment
     for cid, ulist in per_comment_urls.items():
         items: List[Tuple[str, str]] = []
         for u in ulist:
@@ -225,6 +226,39 @@ def embed_linked_images(session: requests.Session, comments: List[Comment], time
         if items:
             by_comment[cid] = items
     return by_comment
+
+# ---------- Cleaning: remove embedded image links from comment HTML ----------
+
+def strip_embedded_image_links_from_html(text_html: str, embedded_urls: List[str]) -> str:
+    """
+    Remove occurrences of embedded image URLs from the comment body:
+      - Removes <a ... href="URL">...</a> anchors whose href equals URL
+      - Removes plain URL text occurrences of URL
+    Only exact-URL matches are removed; other links remain.
+    """
+    if not text_html or not embedded_urls:
+        return text_html
+
+    cleaned = text_html
+
+    for url in embedded_urls:
+        if not url:
+            continue
+        esc = re.escape(url)
+
+        # Remove anchor tags pointing to this URL
+        # greedy minimal DOTALL to cover wrapped contents
+        anchor_pattern = re.compile(rf'<a[^>]+href="{esc}"[^>]*>.*?</a>', re.IGNORECASE | re.DOTALL)
+        cleaned = anchor_pattern.sub("", cleaned)
+
+        # Remove bare URL text (not inside tags)
+        plain_pattern = re.compile(rf'(?<![\'"=]){esc}(?![\'"])')
+        cleaned = plain_pattern.sub("", cleaned)
+
+    # Collapse leftover excessive <br/> lines or blank paragraphs
+    cleaned = re.sub(r'(<br\s*/?>\s*){3,}', r'<br/>', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\n{3,}', r'\n\n', cleaned)
+    return cleaned
 
 # ---------------------- Rendering ------------------------
 
@@ -280,7 +314,7 @@ a:hover { text-decoration: underline; }
 .header .sub { color: var(--muted); font-size:0.95rem; }
 .header .spacer { flex:1; }
 
-/* New split toolbar */
+/* Split toolbar */
 .toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; width:100%; }
 .toolbar-left, .toolbar-right { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .toolbar-right { margin-left:auto; }
@@ -390,12 +424,20 @@ def render_ava(u: User) -> str:
     ini = (u.name or u.nick or "?").strip()[:2].upper()
     return f'<div class="ava">{html.escape(ini)}</div>'
 
-def render_attaches(attaches: list) -> str:
+def render_attaches(attaches: list, skip_urls: Set[str] = None) -> str:
+    """
+    Render non-duplicate attachments. If a richpreview's URL is in skip_urls,
+    we don't render it (image already embedded below).
+    """
+    skip_urls = skip_urls or set()
     out = []
     for a in attaches:
         t = a.get("type"); data = a.get("data")
         if t == "richpreview" and isinstance(data, dict):
-            url = data.get("url") or ""; host = data.get("host") or ""; thumb = data.get("thumbnail") or ""
+            url = data.get("url") or ""
+            if url and url in skip_urls:
+                continue
+            host = data.get("host") or ""; thumb = data.get("thumbnail") or ""
             piece = '<div class="attach">'
             if thumb: piece += f'<img src="{safe_attr(thumb)}" alt="">'
             piece += f'<div><div class="small">Link preview • {html.escape(host)}</div><a href="{safe_attr(url)}" target="_blank">{html.escape(url)}</a></div></div>'
@@ -413,9 +455,6 @@ def hdr_line(u: User, when: str, rating: int) -> str:
     rate = f'<span class="rating">+{rating}</span>' if rating else ""
     return f'<div class="hdr"><span class="name">{html.escape(display_name(u))}</span> {render_badges(u)} <span class="time">· {html.escape(when)}</span> {rate}</div>'
 
-def render_comment_body(c: Comment) -> str:
-    return c.text_html or ""
-
 def render_embedded_images(c: Comment, imgs_by_comment: Dict[int, List[Tuple[str,str]]]) -> str:
     items = imgs_by_comment.get(c.id) or []
     if not items: return ""
@@ -429,6 +468,15 @@ def render_embedded_images(c: Comment, imgs_by_comment: Dict[int, List[Tuple[str
         """)
     return '<div class="embedded-media">' + "\n".join(figs) + "</div>"
 
+def cleaned_body_html(c: Comment, imgs_by_comment: Dict[int, List[Tuple[str,str]]]) -> Tuple[str, Set[str]]:
+    """
+    Return (clean_html, embedded_url_set) so we can also skip duplicate richpreviews.
+    """
+    items = imgs_by_comment.get(c.id) or []
+    urls = [u for (u, _) in items]
+    cleaned = strip_embedded_image_links_from_html(c.text_html, urls)
+    return cleaned, set(urls)
+
 def render_reply_tree(node_id: int, children_map: Dict[int, List["Comment"]],
                       imgs_by_comment: Dict[int, List[Tuple[str,str]]]) -> str:
     kids = children_map.get(node_id, [])
@@ -436,8 +484,8 @@ def render_reply_tree(node_id: int, children_map: Dict[int, List["Comment"]],
     bits: List[str] = []
     for rc in sorted(kids, key=lambda x: x.sort):  # oldest -> newest within thread
         when = iso_to_local_display(rc.created_iso)
-        body = render_comment_body(rc)
-        attaches = render_attaches(rc.attaches)
+        body_html, embedded_urls = cleaned_body_html(rc, imgs_by_comment)
+        attaches_html = render_attaches(rc.attaches, skip_urls=embedded_urls)
         embedded_imgs = render_embedded_images(rc, imgs_by_comment)
         child_html = render_reply_tree(rc.id, children_map, imgs_by_comment)
         bits.append(f'''
@@ -445,8 +493,8 @@ def render_reply_tree(node_id: int, children_map: Dict[int, List["Comment"]],
             {render_ava(rc.user)}
             <div>
               {hdr_line(rc.user, when, rc.rating)}
-              <div class="body">{body}</div>
-              {attaches}
+              <div class="body">{body_html}</div>
+              {attaches_html}
               {embedded_imgs}
               {child_html}
             </div>
@@ -457,8 +505,8 @@ def render_reply_tree(node_id: int, children_map: Dict[int, List["Comment"]],
 def render_root(root: Comment, children_map: Dict[int, List[Comment]],
                 imgs_by_comment: Dict[int, List[Tuple[str,str]]]) -> str:
     when = iso_to_local_display(root.created_iso)
-    body = render_comment_body(root)
-    attaches = render_attaches(root.attaches)
+    body_html, embedded_urls = cleaned_body_html(root, imgs_by_comment)
+    attaches_html = render_attaches(root.attaches, skip_urls=embedded_urls)
     embedded_imgs = render_embedded_images(root, imgs_by_comment)
     anchor = f'<a class="small" href="#c{root.id}" title="Permalink">#{root.id}</a>'
     replies_html = render_reply_tree(root.id, children_map, imgs_by_comment)
@@ -467,8 +515,8 @@ def render_root(root: Comment, children_map: Dict[int, List[Comment]],
       {render_ava(root.user)}
       <div>
         {hdr_line(root.user, when, root.rating)} <span style="margin-left:8px">{anchor}</span>
-        <div class="body">{body}</div>
-        {attaches}
+        <div class="body">{body_html}</div>
+        {attaches_html}
         {embedded_imgs}
         <div class="thread">
           {replies_html}
